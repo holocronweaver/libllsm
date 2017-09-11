@@ -26,7 +26,7 @@
 #include "../envelope.h"
 #include "../llsm.h"
 
-#define FP_TYPE float
+#define FP_TYPE double
 
 char* strdup(const char* s);
 

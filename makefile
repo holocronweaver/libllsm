@@ -2,7 +2,7 @@
 CC = $(CROSS)gcc
 LINK = $(CROSS)gcc
 AR = $(CROSS)ar
-CFLAGS = -DFP_TYPE=float -Og -g -std=c99 -Wall -fPIC -fopenmp $(CFLAGSEXT)
+CFLAGS = -DFP_TYPE=double -Og -g -std=c99 -Wall -fPIC -fopenmp $(CFLAGSEXT)
 ARFLAGS = -rv
 OUT_DIR = ./build
 OBJS = $(OUT_DIR)/math-funcs.o $(OUT_DIR)/llsm-layer0.o $(OUT_DIR)/llsm-layer1.o $(OUT_DIR)/envelope.o
