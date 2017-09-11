@@ -11,7 +11,8 @@ LIBGVPS = $(LIBPYIN)/external/libgvps
 
 default: $(OUT_DIR)/libllsm.a
 test: $(OUT_DIR)/llsm-test
-	$(OUT_DIR)/llsm-test test/arctic_a0001.wav
+	$(OUT_DIR)/llsm-test ../../llsm_demo/sing-tone.wav
+#$(OUT_DIR)/llsm-test test/arctic_a0001.wav
 
 $(OUT_DIR)/llsm-test: $(OUT_DIR)/libllsm.a $(OUT_DIR)/ciglet.o test/test.c \
     $(LIBGVPS)/build/libgvps.a $(LIBPYIN)/build/libpyin.a

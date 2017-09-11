@@ -48,8 +48,10 @@ int main(int argc, char** argv) {
   int nfrm = 0;
   int nhop = 256;
   FP_TYPE* f0 = NULL;
+  // samples = filename, sampling frequency, num bits per sample, num samples.
   FP_TYPE* x = wavread(argv[1], & fs, & nbit, & nx);
-  
+
+  // See llsm.h.
   llsm_parameters lparam = llsm_init(4);
   lparam.a_nosbandf[0] = 2000;
   lparam.a_nosbandf[1] = 5000;
@@ -62,6 +64,8 @@ int main(int argc, char** argv) {
   lparam.a_nhare = 5;
   
   if(argc < 4) {
+    // Probabilistic YIN extraction of fundamental frequency.
+    // See pyin.h.
     pyin_config param = pyin_init(nhop);
     param.fmin = 50.0;
     param.fmax = 900.0;
@@ -69,6 +73,11 @@ int main(int argc, char** argv) {
     param.nf = ceil(fs * 0.025);
     param.w = param.nf / 4;
     param.bias = 10;
+    // f0 is the fundamental frequency at a particular sliding frame.
+    // x are samples, nx is total number of samples.
+    // nf is the size of the analysis frame (set to 2.5% of sampling
+    // frequency), nhop is 'hop' size between frames.
+    // nfrm = number of f0 analysis frames.
     f0 = pyin_analyze(param, x, nx, fs, & nfrm);
   } else {
     // load f0 from binary file
@@ -89,29 +98,26 @@ int main(int argc, char** argv) {
     lparam.a_f0refine = 0;
   }
 
-#if 0
-  FILE* samples_f = fopen("samples.txt", "w");
-  for (int i = 0; i < nx; i++) fprintf(samples_f, "%f\n", x[i]);
-  fclose(samples_f);
-
-  FILE* f0_f = fopen("f0.txt", "w");
-  for (int i = 0; i < nfrm; i++) fprintf(f0_f, "%f\n", f0[i]);
-  fclose(f0_f);
-#endif
-
+  // Harmonic + stochastic analysis of f0 windows.
+  //TODO: Stochastic part is...?
   printf("Analyzing (lv0)...\n");
   llsm_layer0* model = llsm_layer0_analyze(lparam, x, nx, fs, f0, nfrm, NULL);
-  
+
+  // Phase of fundamental frequency at each window.
   FP_TYPE* phase0 = calloc(nfrm, sizeof(FP_TYPE));
   for(int i = 0; i < nfrm; i ++)
     phase0[i] = model -> frames[i] -> f0 > 0 ? -model -> frames[i] -> sinu -> phse[0] : 0;
+  // Shift the noise phase in each frame using above phase.
+  //TODO: Why?
   llsm_layer0_phaseshift(model, phase0);
   free(phase0);
 
   printf("Analyzing (lv1)...\n");
+  // number of fft freqs = 2048.
   llsm_layer1* model_lv1 = llsm_layer1_from_layer0(lparam, model, 2048, fs);
 
   printf("\nModifying...\n");
+  // Pitch shift fundamental frequency on each frame.
   FP_TYPE* faxis = llsm_uniform_faxis(2048, lparam.a_nosf * 2);
   for(int i = 0; i < model -> conf.nfrm; i ++) {
     llsm_frame* iframe = model -> frames[i];
@@ -128,12 +134,17 @@ int main(int argc, char** argv) {
         break;
       }
     }
+    // Interpolate ampl & phases from acoustic model frequencies to output frequencies.
     FP_TYPE* newampl = interp1(faxis, model_lv1 -> vt_resp_magn[i], nfft / 2 + 1, freq, iframe -> sinu -> nhar);
     for(int j = 0; j < iframe -> sinu -> nhar; j ++) newampl[j] = exp(newampl[j]);
     FP_TYPE* newphse = llsm_harmonic_minphase(newampl, iframe -> sinu -> nhar);
     FP_TYPE* lipampl = interp1(faxis, model_lv1 -> lip_resp_magn, nfft / 2 + 1, freq, iframe -> sinu -> nhar);
     FP_TYPE* lipphse = interp1(faxis, model_lv1 -> lip_resp_phse, nfft / 2 + 1, freq, iframe -> sinu -> nhar);
 
+    // Use acoustic model amplitudes and phases to change frame values.
+
+    // Amplitudes are adjusted for frequency change ratio to counter
+    // change in number of harmonics within audible range.
     for(int j = 0; j < iframe -> sinu -> nhar; j ++) {
       iframe -> sinu -> ampl[j] = model_lv1 -> vs_har_ampl[i][j] * newampl[j] * lipampl[j] * origf0 / iframe -> f0;
       iframe -> sinu -> phse[j] = model_lv1 -> vs_har_phse[i][j] + newphse[j] + lipphse[j];
@@ -147,35 +158,13 @@ int main(int argc, char** argv) {
   free(faxis);
   llsm_delete_layer1(model_lv1);
 
-#if 1
-  FILE* sinu_ampl_f = fopen("sinu_ampl.txt", "w");
-  FILE* sinu_phse_f = fopen("sinu_phse.txt", "w");
-  for(int i = 0; i < model -> conf.nfrm; i ++) {
-      llsm_frame* iframe = model -> frames[i];
-      for(int j = 0; j < iframe -> sinu -> nhar; j ++) {
-          fprintf(sinu_ampl_f, "%f\n", iframe -> sinu -> ampl[j]);
-          fprintf(sinu_phse_f, "%f\n", iframe -> sinu -> phse[j]);
-      }
-  }
-  fclose(sinu_ampl_f);
-  fclose(sinu_phse_f);
-#endif
-  
+  //TODO: Final phase shift...why?
   phase0 = calloc(nfrm, sizeof(FP_TYPE));
   for(int i = 1; i < nfrm; i ++)
     if(model -> frames[i] -> f0 > 0)
       phase0[i] = phase0[i - 1] + model -> frames[i] -> f0 * nhop / fs * 2 * M_PI;
   llsm_layer0_phaseshift(model, phase0);
   free(phase0);
-
-#if 0
-  FILE* phase0_f = fopen("phase0.txt", "w");
-  for (int i = 0; i < nfrm; i++) fprintf(phase0_f, "%f\n", phase0[i]);
-  fclose(phase0_f);
-  FILE* f0_mod_f = fopen("f0_mod.txt", "w");
-  for (int i = 0; i < nfrm; i++) fprintf(f0_mod_f, "%f\n", model->frames[i]->f0);
-  fclose(f0_mod_f);
-#endif
 
   lparam.s_fs = fs;
 
@@ -184,12 +173,6 @@ int main(int argc, char** argv) {
   llsm_output* out = llsm_layer0_synthesize(lparam, model);
   double tspent = get_time() - t0;
   printf("%f ms, %fs/s\n", tspent, (FP_TYPE)nx / fs / tspent * 1000);
-
-#if 1
-  FILE* output_f = fopen("output.txt", "w");
-  for (int i = 0; i < out->ny; i++) fprintf(output_f, "%f\n", out->y[i]);
-  fclose(output_f);
-#endif
   
   wavwrite(out -> y, out -> ny, lparam.s_fs, 16, "resynth.wav");
 
